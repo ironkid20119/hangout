@@ -16,6 +16,7 @@
             overflow: hidden;
             background: #1a1a2e;
             touch-action: none;
+            cursor: none; /* Hide default cursor */
         }
         
         #gameCanvas {
@@ -36,6 +37,7 @@
             justify-content: center;
             align-items: center;
             z-index: 1000;
+            cursor: auto;
         }
         
         #loginScreen h1 {
@@ -85,6 +87,7 @@
             padding: 10px;
             display: none;
             z-index: 100;
+            cursor: auto;
         }
         
         #chatMessages {
@@ -160,6 +163,7 @@
             display: none;
             font-size: 12px;
             z-index: 100;
+            cursor: auto;
         }
 
         #settings {
@@ -174,6 +178,7 @@
             display: none;
             z-index: 100;
             min-width: 200px;
+            cursor: auto;
         }
 
         #settings label {
@@ -207,6 +212,86 @@
         #lockPrompt:hover {
             background: rgba(22, 33, 62, 1);
             border-color: #00cc6a;
+        }
+
+        /* Custom Cursor for PC */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 150;
+            display: none;
+        }
+
+        #crosshair .dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            background: #00ff88;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #crosshair .line {
+            position: absolute;
+            background: #00ff88;
+        }
+
+        #crosshair .line.horizontal {
+            width: 16px;
+            height: 2px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #crosshair .line.vertical {
+            width: 2px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Speed Boost Indicator */
+        #speedBoost {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            color: #00ffff;
+            background: rgba(22, 33, 62, 0.9);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 2px solid #00ffff;
+            display: none;
+            z-index: 100;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        /* Mobile Tap Counter */
+        #tapCounter {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ff6b6b;
+            background: rgba(22, 33, 62, 0.9);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 2px solid #ff6b6b;
+            display: none;
+            z-index: 100;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            min-width: 60px;
         }
 
         /* Mobile Controls */
@@ -326,6 +411,10 @@
             #chatMessages {
                 height: 120px;
             }
+
+            #crosshair {
+                display: none !important;
+            }
         }
     </style>
 </head>
@@ -336,14 +425,22 @@
         <button id="joinButton">Join Hangout</button>
     </div>
 
+    <div id="crosshair">
+        <div class="dot"></div>
+        <div class="line horizontal"></div>
+        <div class="line vertical"></div>
+    </div>
+
     <div id="lockPrompt">
-        Click anywhere to lock mouse
+        Click to lock mouse for camera control<br>
+        Right-click to return to gun aiming
     </div>
     
     <div id="controls">
         <strong>Controls:</strong><br>
         WASD - Move<br>
-        Mouse - Look around<br>
+        Mouse - Aim gun (visible cursor)<br>
+        Right Click - Hold to rotate camera<br>
         Space - Jump<br>
         Enter - Chat<br>
         Left Click - Shoot (if you have gun)<br>
@@ -356,6 +453,14 @@
             <div id="healthFill"></div>
         </div>
         HP: <span id="healthText">25/25</span>
+    </div>
+
+    <div id="speedBoost">
+        SPEED BOOST: <span id="speedTimer">0</span>s
+    </div>
+
+    <div id="tapCounter">
+        Taps: <span id="tapCount">0</span>/3
     </div>
 
     <div id="settings">
@@ -373,7 +478,6 @@
 
     <div id="mobileControls">
         <div id="jumpButton">JUMP</div>
-        <div id="shootButton">SHOOT</div>
         <div id="joystick">
             <div id="joystickKnob"></div>
         </div>
@@ -396,6 +500,7 @@
         let cameraRotation = { x: 0, y: 0 };
         let cameraSensitivity = 1.0;
         let isPointerLocked = false;
+        let rightMouseDown = false;
         
         // Jump physics
         let isJumping = false;
@@ -424,10 +529,21 @@
         const gunDamage = 12.5;
         const GUN_RESPAWN_TIME = 10000; // 10 seconds
 
-        // AI spawn timer
+        // AI spawn timer - 3x faster (was 45000, now 15000)
         let lastAISpawn = Date.now();
-        const AI_SPAWN_INTERVAL = 45000; // 45 seconds
+        const AI_SPAWN_INTERVAL = 15000; // 15 seconds (3x faster)
         const AI_LIFETIME = 60000; // 1 minute
+
+        // Speed boost system
+        let speedBoostActive = false;
+        let speedBoostEndTime = 0;
+        const SPEED_BOOST_DURATION = 10000; // 10 seconds
+        let speedBoostInterval = null;
+
+        // Mobile triple-tap shooting
+        let tapTimes = [];
+        const TAP_TIMEOUT = 1500; // 1.5 seconds
+        let tapCount = 0;
 
         // Initialize Three.js scene
         function initScene() {
@@ -594,19 +710,46 @@
 
             // Create bullet trace effect
             const bulletGeometry = new THREE.BufferGeometry();
+            
+            // Use mouse position for aiming (not camera direction)
             const bulletStart = new THREE.Vector3(
                 localPlayer.mesh.position.x,
                 localPlayer.mesh.position.y + 1.5,
                 localPlayer.mesh.position.z
             );
 
-            // Ray direction from camera
-            const direction = new THREE.Vector3(
-                Math.sin(cameraRotation.y),
-                Math.sin(-cameraRotation.x),
-                Math.cos(cameraRotation.y)
-            ).normalize();
+            // Calculate direction based on camera and mouse position
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            
+            if (!isMobile && !rightMouseDown) {
+                // Use screen center for PC when not in camera mode
+                mouse.x = 0;
+                mouse.y = 0;
+            } else {
+                // Use camera direction when in camera mode
+                const direction = new THREE.Vector3(
+                    Math.sin(cameraRotation.y),
+                    Math.sin(-cameraRotation.x),
+                    Math.cos(cameraRotation.y)
+                ).normalize();
+                
+                const bulletEnd = bulletStart.clone().add(direction.multiplyScalar(100));
+                bulletGeometry.setFromPoints([bulletStart, bulletEnd]);
+                
+                const bulletMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
+                const bulletLine = new THREE.Line(bulletGeometry, bulletMaterial);
+                scene.add(bulletLine);
+                setTimeout(() => scene.remove(bulletLine), 100);
 
+                // Check for hits
+                checkBulletHits(bulletStart, direction);
+                return;
+            }
+
+            // For PC with visible mouse aiming
+            raycaster.setFromCamera(mouse, camera);
+            const direction = raycaster.ray.direction;
             const bulletEnd = bulletStart.clone().add(direction.multiplyScalar(100));
 
             bulletGeometry.setFromPoints([bulletStart, bulletEnd]);
@@ -617,10 +760,19 @@
             // Remove bullet trace after short delay
             setTimeout(() => scene.remove(bulletLine), 100);
 
+            // Check for hits
+            checkBulletHits(bulletStart, direction);
+
+            if (gunAmmo === 0) {
+                addChatMessage('Gun empty!', 'system');
+            }
+        }
+
+        function checkBulletHits(start, direction) {
             // Check for hits on players
             Object.values(players).forEach(player => {
                 const playerPos = player.mesh.position;
-                const toPlayer = new THREE.Vector3().subVectors(playerPos, bulletStart);
+                const toPlayer = new THREE.Vector3().subVectors(playerPos, start);
                 const dist = toPlayer.length();
                 
                 if (dist < 100) {
@@ -641,7 +793,7 @@
             // Check for hits on AI
             aiEntities.forEach((ai, index) => {
                 const aiPos = ai.mesh.position;
-                const toAI = new THREE.Vector3().subVectors(aiPos, bulletStart);
+                const toAI = new THREE.Vector3().subVectors(aiPos, start);
                 const dist = toAI.length();
                 
                 if (dist < 100) {
@@ -653,10 +805,6 @@
                     }
                 }
             });
-
-            if (gunAmmo === 0) {
-                addChatMessage('Gun empty!', 'system');
-            }
         }
 
         function updateGunDisplay() {
@@ -721,7 +869,7 @@
         function updateAI() {
             const now = Date.now();
             
-            // Spawn new AI
+            // Spawn new AI (3x faster)
             if (now - lastAISpawn > AI_SPAWN_INTERVAL) {
                 spawnAI();
                 lastAISpawn = now;
@@ -849,9 +997,11 @@
                 if (!isMobile) {
                     document.getElementById('controls').style.display = 'block';
                     document.getElementById('lockPrompt').style.display = 'block';
+                    document.getElementById('crosshair').style.display = 'block';
                 } else {
                     document.getElementById('mobileControls').style.display = 'block';
                     document.getElementById('chatToggle').style.display = 'flex';
+                    document.getElementById('tapCounter').style.display = 'block';
                 }
                 
                 startGame();
@@ -877,8 +1027,13 @@
             animate();
             
             addChatMessage('Welcome to Poly\'s Weird Hangout!', 'system');
-            addChatMessage(isMobile ? 'Use joystick to move!' : 'Click to lock mouse and look around!', 'system');
+            if (!isMobile) {
+                addChatMessage('Use visible mouse to aim! Right-click to rotate camera!', 'system');
+            } else {
+                addChatMessage('Tap screen 3 times within 1.5 seconds to shoot!', 'system');
+            }
             addChatMessage('Gun spawns randomly and respawns every 10 seconds!', 'system');
+            addChatMessage('Speed zones give 10-second speed boost!', 'system');
             
             // Notify if player has special size
             if (localPlayer.scale === 2) {
@@ -891,9 +1046,9 @@
         // WebSocket connection
         function connectWebSocket() {
             // Auto-detect WebSocket URL based on current page
-const isSecure = window.location.protocol === 'https:';
-const wsProtocol = isSecure ? 'wss:' : 'ws:';
-const serverUrl = wsProtocol + '//' + window.location.host;
+            const isSecure = window.location.protocol === 'https:';
+            const wsProtocol = isSecure ? 'wss:' : 'ws:';
+            const serverUrl = wsProtocol + '//' + window.location.host;
             
             try {
                 wss = new WebSocket(serverUrl);
@@ -974,35 +1129,64 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                 document.getElementById('sensValue').textContent = cameraSensitivity.toFixed(1);
             });
 
-            // Pointer lock for PC
+            // PC Controls with visible mouse for gun aiming
             if (!isMobile) {
-                const requestPointerLock = () => {
-                    if (!chatActive && !isPointerLocked) {
-                        renderer.domElement.requestPointerLock = renderer.domElement.requestPointerLock ||
-                            renderer.domElement.mozRequestPointerLock ||
-                            renderer.domElement.webkitRequestPointerLock;
-                        renderer.domElement.requestPointerLock();
+                // Right mouse button for camera rotation
+                document.addEventListener('mousedown', (e) => {
+                    if (e.button === 2) { // Right click
+                        e.preventDefault();
+                        rightMouseDown = true;
+                        document.body.style.cursor = 'none';
+                        document.getElementById('crosshair').style.display = 'none';
+                        document.getElementById('lockPrompt').style.display = 'none';
+                        
+                        // Request pointer lock for camera control
+                        if (!chatActive && !isPointerLocked) {
+                            renderer.domElement.requestPointerLock();
+                        }
+                    } else if (e.button === 0 && hasGun && gunAmmo > 0 && !rightMouseDown && !chatActive) {
+                        // Left click to shoot when not in camera mode
+                        shoot();
                     }
-                };
+                });
 
-                // Click on canvas or prompt to lock
-                renderer.domElement.addEventListener('click', requestPointerLock);
-                document.getElementById('lockPrompt').addEventListener('click', requestPointerLock);
-                document.body.addEventListener('click', requestPointerLock);
+                document.addEventListener('mouseup', (e) => {
+                    if (e.button === 2) { // Right click released
+                        rightMouseDown = false;
+                        document.body.style.cursor = 'none'; // Still hide default cursor
+                        document.getElementById('crosshair').style.display = 'block';
+                        
+                        // Exit pointer lock when right mouse is released
+                        if (isPointerLocked) {
+                            document.exitPointerLock();
+                        }
+                    }
+                });
 
+                // Prevent context menu on right click
+                document.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                });
+
+                // Pointer lock handling
                 const pointerLockChange = () => {
                     isPointerLocked = !!(document.pointerLockElement || 
                                         document.mozPointerLockElement || 
                                         document.webkitPointerLockElement);
-                    document.getElementById('lockPrompt').style.display = isPointerLocked ? 'none' : 'block';
+                    
+                    // Only show prompt when not in camera mode
+                    if (!rightMouseDown) {
+                        document.getElementById('lockPrompt').style.display = isPointerLocked ? 'none' : 'block';
+                    }
                 };
 
                 document.addEventListener('pointerlockchange', pointerLockChange);
                 document.addEventListener('mozpointerlockchange', pointerLockChange);
                 document.addEventListener('webkitpointerlockchange', pointerLockChange);
 
+                // Mouse movement for camera rotation (only when right mouse is down)
                 document.addEventListener('mousemove', (e) => {
-                    if (isPointerLocked && !chatActive) {
+                    if (rightMouseDown && isPointerLocked && !chatActive) {
                         const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
                         const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
                         
@@ -1012,12 +1196,15 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                     }
                 });
 
-                // Shooting with left click
-                document.addEventListener('mousedown', (e) => {
-                    if (e.button === 0 && isPointerLocked && !chatActive && hasGun && gunAmmo > 0) {
-                        shoot();
+                // Click prompt to lock mouse (for initial setup)
+                const requestPointerLock = () => {
+                    if (!chatActive && !isPointerLocked) {
+                        renderer.domElement.requestPointerLock();
                     }
-                });
+                };
+
+                renderer.domElement.addEventListener('click', requestPointerLock);
+                document.getElementById('lockPrompt').addEventListener('click', requestPointerLock);
             }
 
             // Keyboard controls
@@ -1040,6 +1227,16 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                         if (isPointerLocked) {
                             document.exitPointerLock();
                         }
+                        // Show cursor in chat
+                        document.body.style.cursor = 'auto';
+                        document.getElementById('crosshair').style.display = 'none';
+                        break;
+                    case 'escape':
+                        if (isPointerLocked) {
+                            document.exitPointerLock();
+                            rightMouseDown = false;
+                            document.getElementById('crosshair').style.display = 'block';
+                        }
                         break;
                 }
             });
@@ -1053,8 +1250,32 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                 }
             });
 
-            // Touch camera controls for mobile
+            // Mobile Controls
             if (isMobile) {
+                // Triple-tap shooting
+                let lastTapTime = 0;
+                renderer.domElement.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    
+                    const currentTime = Date.now();
+                    tapTimes.push(currentTime);
+                    
+                    // Keep only taps within the timeout period
+                    tapTimes = tapTimes.filter(time => currentTime - time <= TAP_TIMEOUT);
+                    
+                    tapCount = tapTimes.length;
+                    document.getElementById('tapCount').textContent = tapCount;
+                    
+                    // If 3 taps within timeout, shoot
+                    if (tapCount >= 3 && hasGun && gunAmmo > 0) {
+                        shoot();
+                        tapTimes = []; // Reset taps
+                        tapCount = 0;
+                        document.getElementById('tapCount').textContent = tapCount;
+                    }
+                });
+
+                // Touch camera controls
                 let touchStartPos = null;
                 renderer.domElement.addEventListener('touchstart', (e) => {
                     if (e.touches.length === 1 && !chatActive) {
@@ -1132,14 +1353,6 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                     jump();
                 });
 
-                // Shoot button
-                document.getElementById('shootButton').addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    if (hasGun && gunAmmo > 0) {
-                        shoot();
-                    }
-                });
-
                 // Chat toggle for mobile
                 document.getElementById('chatToggle').addEventListener('click', () => {
                     const chatContainer = document.getElementById('chatContainer');
@@ -1165,6 +1378,12 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                     e.target.value = '';
                     e.target.blur();
                     chatActive = false;
+                    
+                    // Restore cursor state
+                    if (!isMobile) {
+                        document.body.style.cursor = rightMouseDown ? 'none' : 'none';
+                        document.getElementById('crosshair').style.display = rightMouseDown ? 'none' : 'block';
+                    }
                 }
             });
 
@@ -1229,10 +1448,18 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                 }
             });
 
+            // Check speed zones for temporary boost
+            speedZones.forEach(zone => {
+                const distance = localPlayer.mesh.position.distanceTo(zone.position);
+                if (distance < 5 && !speedBoostActive) {
+                    activateSpeedBoost();
+                }
+            });
+
             // Check gun pickup
             if (gunPickup && !gunPickup.userData.pickedUp) {
                 gunPickup.rotation.y += 0.02;
-                const pickupDistance = 2 * localPlayer.scale; // Adjust for player size
+                const pickupDistance = 2 * localPlayer.scale;
                 const distance = localPlayer.mesh.position.distanceTo(gunPickup.position);
                 if (distance < pickupDistance) {
                     gunPickup.userData.pickedUp = true;
@@ -1242,14 +1469,34 @@ const serverUrl = wsProtocol + '//' + window.location.host;
                     updateGunDisplay();
                     addChatMessage('Picked up gun! (3 shots, 12.5 damage)', 'system');
                     if (isMobile) {
-                        document.getElementById('shootButton').style.display = 'flex';
-                        addChatMessage('Tap SHOOT button to fire!', 'system');
+                        addChatMessage('Tap screen 3 times within 1.5s to shoot!', 'system');
                     } else {
-                        addChatMessage('Left click to shoot!', 'system');
+                        addChatMessage('Left click to shoot! Right-click to rotate camera!', 'system');
                     }
                     respawnGun();
                 }
             }
+        }
+
+        function activateSpeedBoost() {
+            speedBoostActive = true;
+            speedBoostEndTime = Date.now() + SPEED_BOOST_DURATION;
+            document.getElementById('speedBoost').style.display = 'block';
+            
+            // Update speed boost timer
+            if (speedBoostInterval) clearInterval(speedBoostInterval);
+            speedBoostInterval = setInterval(() => {
+                const timeLeft = Math.max(0, Math.ceil((speedBoostEndTime - Date.now()) / 1000));
+                document.getElementById('speedTimer').textContent = timeLeft;
+                
+                if (timeLeft <= 0) {
+                    speedBoostActive = false;
+                    document.getElementById('speedBoost').style.display = 'none';
+                    clearInterval(speedBoostInterval);
+                }
+            }, 100);
+            
+            addChatMessage('Speed boost activated for 10 seconds!', 'system');
         }
 
         function takeDamage(amount) {
@@ -1285,13 +1532,10 @@ const serverUrl = wsProtocol + '//' + window.location.host;
             const baseSpeed = 0.2;
             let speed = baseSpeed;
             
-            // Check if in speed zone
-            speedZones.forEach(zone => {
-                const distance = localPlayer.mesh.position.distanceTo(zone.position);
-                if (distance < 5) {
-                    speed = baseSpeed * 2;
-                }
-            });
+            // Apply speed boost if active
+            if (speedBoostActive) {
+                speed = baseSpeed * 2;
+            }
 
             const direction = new THREE.Vector3();
 
