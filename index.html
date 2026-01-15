@@ -386,7 +386,7 @@
         let localPlayer = null;
         let players = {};
         let aiEntities = [];
-        let ws = null;
+        let wss = null;
         let username = '';
         let moveState = { forward: false, backward: false, left: false, right: false };
         let chatActive = false;
@@ -626,8 +626,8 @@
                 if (dist < 100) {
                     const angle = direction.angleTo(toPlayer);
                     if (angle < 0.1) { // Hit detection cone
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({
+                        if (wss && wss.readyState === WebSocket.OPEN) {
+                            wss.send(JSON.stringify({
                                 type: 'damage',
                                 targetId: player.id,
                                 damage: gunDamage
@@ -890,14 +890,14 @@
 
         // WebSocket connection
         function connectWebSocket() {
-            const serverUrl = 'ws://localhost:3000';
+            const serverUrl = 'wsss://localhost:3000';
             
             try {
-                ws = new WebSocket(serverUrl);
+                wss = new WebSocket(serverUrl);
                 
-                ws.onopen = () => {
+                wss.onopen = () => {
                     addChatMessage('Connected to server!', 'system');
-                    ws.send(JSON.stringify({
+                    wss.send(JSON.stringify({
                         type: 'join',
                         username: username,
                         color: localPlayer.mesh.material.color.getHex(),
@@ -905,16 +905,16 @@
                     }));
                 };
 
-                ws.onmessage = (event) => {
+                wss.onmessage = (event) => {
                     const data = JSON.parse(event.data);
                     handleServerMessage(data);
                 };
 
-                ws.onerror = () => {
+                wss.onerror = () => {
                     addChatMessage('Running in offline mode', 'system');
                 };
 
-                ws.onclose = () => {
+                wss.onclose = () => {
                     addChatMessage('Disconnected from server', 'system');
                 };
             } catch (error) {
@@ -1149,8 +1149,8 @@
                 if (e.key === 'Enter') {
                     const message = e.target.value.trim();
                     if (message) {
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({
+                        if (wss && wss.readyState === WebSocket.OPEN) {
+                            wss.send(JSON.stringify({
                                 type: 'chat',
                                 message: message
                             }));
@@ -1366,8 +1366,8 @@
             updateAI();
 
             // Send position to server
-            if (ws && ws.readyState === WebSocket.OPEN && (direction.length() > 0 || isJumping)) {
-                ws.send(JSON.stringify({
+            if (wss && wss.readyState === WebSocket.OPEN && (direction.length() > 0 || isJumping)) {
+                wss.send(JSON.stringify({
                     type: 'move',
                     position: localPlayer.mesh.position
                 }));
