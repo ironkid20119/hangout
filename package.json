@@ -1,6 +1,16 @@
 {
-  "name": "multiplayer-game",
+  "name": "polys-weird-hangout",
   "version": "1.0.0",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "ws": "^8.0.0" }
+  "description": "Multiplayer 3D Game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "ws": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
 }
