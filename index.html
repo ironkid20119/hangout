@@ -432,18 +432,17 @@
     </div>
 
     <div id="lockPrompt">
-        Click to lock mouse for camera control<br>
-        Right-click to return to gun aiming
+        Click here to AIM (Lock Cursor)<br>
+        Press ESC to Unlock
     </div>
     
     <div id="controls">
         <strong>Controls:</strong><br>
         WASD - Move<br>
-        Mouse - Aim gun (visible cursor)<br>
-        Right Click - Hold to rotate camera<br>
+        Click Game - Aim Mode (Lock Cursor)<br>
+        Left Click - Shoot (When Aiming)<br>
         Space - Jump<br>
         Enter - Chat<br>
-        Left Click - Shoot (if you have gun)<br>
         ESC - Unlock mouse
     </div>
     
@@ -500,7 +499,6 @@
         let cameraRotation = { x: 0, y: 0 };
         let cameraSensitivity = 1.0;
         let isPointerLocked = false;
-        let rightMouseDown = false;
         
         // Jump physics
         let isJumping = false;
@@ -718,51 +716,24 @@
                 localPlayer.mesh.position.z
             );
 
-            // Calculate direction based on camera and mouse position
-            const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2();
+            // Calculate direction based on camera direction (PC Aim or Mobile Tap)
+            const direction = new THREE.Vector3(
+                Math.sin(cameraRotation.y),
+                Math.sin(-cameraRotation.x),
+                Math.cos(cameraRotation.y)
+            ).normalize();
             
-            if (!isMobile && !rightMouseDown) {
-                // Use screen center for PC when not in camera mode
-                mouse.x = 0;
-                mouse.y = 0;
-            } else {
-                // Use camera direction when in camera mode
-                const direction = new THREE.Vector3(
-                    Math.sin(cameraRotation.y),
-                    Math.sin(-cameraRotation.x),
-                    Math.cos(cameraRotation.y)
-                ).normalize();
-                
-                const bulletEnd = bulletStart.clone().add(direction.multiplyScalar(100));
-                bulletGeometry.setFromPoints([bulletStart, bulletEnd]);
-                
-                const bulletMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
-                const bulletLine = new THREE.Line(bulletGeometry, bulletMaterial);
-                scene.add(bulletLine);
-                setTimeout(() => scene.remove(bulletLine), 100);
-
-                // Check for hits
-                checkBulletHits(bulletStart, direction);
-                return;
-            }
-
-            // For PC with visible mouse aiming
-            raycaster.setFromCamera(mouse, camera);
-            const direction = raycaster.ray.direction;
             const bulletEnd = bulletStart.clone().add(direction.multiplyScalar(100));
-
             bulletGeometry.setFromPoints([bulletStart, bulletEnd]);
+            
             const bulletMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
             const bulletLine = new THREE.Line(bulletGeometry, bulletMaterial);
             scene.add(bulletLine);
-
-            // Remove bullet trace after short delay
             setTimeout(() => scene.remove(bulletLine), 100);
 
             // Check for hits
             checkBulletHits(bulletStart, direction);
-
+         
             if (gunAmmo === 0) {
                 addChatMessage('Gun empty!', 'system');
             }
@@ -1028,7 +999,7 @@
             
             addChatMessage('Welcome to Poly\'s Weird Hangout!', 'system');
             if (!isMobile) {
-                addChatMessage('Use visible mouse to aim! Right-click to rotate camera!', 'system');
+                addChatMessage('Click game to AIM. Click to SHOOT.', 'system');
             } else {
                 addChatMessage('Tap screen 3 times within 1.5 seconds to shoot!', 'system');
             }
@@ -1119,6 +1090,12 @@
                     });
                     updatePlayerCount();
                     break;
+
+                case 'damage':
+                    // Handle incoming damage
+                    takeDamage(data.damage);
+                    addChatMessage(`Hit by ${players[data.from]?.name || 'another player'}!`, 'system');
+                    break;
             }
         }
 
@@ -1129,54 +1106,42 @@
                 document.getElementById('sensValue').textContent = cameraSensitivity.toFixed(1);
             });
 
-            // PC Controls with visible mouse for gun aiming
+            // PC Controls: "Click to aim (lock), Click to shoot"
             if (!isMobile) {
-                // Right mouse button for camera rotation
-                document.addEventListener('mousedown', (e) => {
-                    if (e.button === 2) { // Right click
-                        e.preventDefault();
-                        rightMouseDown = true;
-                        document.body.style.cursor = 'none';
-                        document.getElementById('crosshair').style.display = 'none';
-                        document.getElementById('lockPrompt').style.display = 'none';
-                        
-                        // Request pointer lock for camera control
-                        if (!chatActive && !isPointerLocked) {
-                            renderer.domElement.requestPointerLock();
-                        }
-                    } else if (e.button === 0 && hasGun && gunAmmo > 0 && !rightMouseDown && !chatActive) {
-                        // Left click to shoot when not in camera mode
-                        shoot();
+                // 1. Click to Aim (Lock Pointer)
+                const requestPointerLock = () => {
+                    if (!chatActive && !isPointerLocked) {
+                        renderer.domElement.requestPointerLock();
                     }
-                });
+                };
 
-                document.addEventListener('mouseup', (e) => {
-                    if (e.button === 2) { // Right click released
-                        rightMouseDown = false;
-                        document.body.style.cursor = 'none'; // Still hide default cursor
-                        document.getElementById('crosshair').style.display = 'block';
-                        
-                        // Exit pointer lock when right mouse is released
-                        if (isPointerLocked) {
-                            document.exitPointerLock();
+                // Click prompt or canvas to lock
+                document.getElementById('lockPrompt').addEventListener('click', requestPointerLock);
+                renderer.domElement.addEventListener('click', (e) => {
+                    if (!isPointerLocked) {
+                        requestPointerLock();
+                    } else {
+                        // 2. Already Locked? Then Shoot!
+                        if (hasGun && gunAmmo > 0 && !chatActive) {
+                            shoot();
                         }
                     }
                 });
 
-                // Prevent context menu on right click
-                document.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                });
-
-                // Pointer lock handling
+                // Pointer lock state changes
                 const pointerLockChange = () => {
                     isPointerLocked = !!(document.pointerLockElement || 
                                         document.mozPointerLockElement || 
                                         document.webkitPointerLockElement);
                     
-                    // Only show prompt when not in camera mode
-                    if (!rightMouseDown) {
-                        document.getElementById('lockPrompt').style.display = isPointerLocked ? 'none' : 'block';
+                    if (isPointerLocked) {
+                        // Locked: Show Crosshair, Hide Prompt, Aiming is active
+                        document.getElementById('lockPrompt').style.display = 'none';
+                        document.getElementById('crosshair').style.display = 'block';
+                    } else {
+                        // Unlocked: Show Prompt, Hide Crosshair, Cursor visible
+                        document.getElementById('lockPrompt').style.display = 'block';
+                        document.getElementById('crosshair').style.display = 'none';
                     }
                 };
 
@@ -1184,9 +1149,9 @@
                 document.addEventListener('mozpointerlockchange', pointerLockChange);
                 document.addEventListener('webkitpointerlockchange', pointerLockChange);
 
-                // Mouse movement for camera rotation (only when right mouse is down)
+                // Mouse Movement (Only rotates camera when Locked)
                 document.addEventListener('mousemove', (e) => {
-                    if (rightMouseDown && isPointerLocked && !chatActive) {
+                    if (isPointerLocked && !chatActive) {
                         const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
                         const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
                         
@@ -1195,16 +1160,6 @@
                         cameraRotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotation.x));
                     }
                 });
-
-                // Click prompt to lock mouse (for initial setup)
-                const requestPointerLock = () => {
-                    if (!chatActive && !isPointerLocked) {
-                        renderer.domElement.requestPointerLock();
-                    }
-                };
-
-                renderer.domElement.addEventListener('click', requestPointerLock);
-                document.getElementById('lockPrompt').addEventListener('click', requestPointerLock);
             }
 
             // Keyboard controls
@@ -1234,8 +1189,6 @@
                     case 'escape':
                         if (isPointerLocked) {
                             document.exitPointerLock();
-                            rightMouseDown = false;
-                            document.getElementById('crosshair').style.display = 'block';
                         }
                         break;
                 }
@@ -1253,9 +1206,8 @@
             // Mobile Controls
             if (isMobile) {
                 // Triple-tap shooting
-                let lastTapTime = 0;
                 renderer.domElement.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
+                    // Don't prevent default here to allow other touch actions, check if necessary
                     
                     const currentTime = Date.now();
                     tapTimes.push(currentTime);
@@ -1381,8 +1333,11 @@
                     
                     // Restore cursor state
                     if (!isMobile) {
-                        document.body.style.cursor = rightMouseDown ? 'none' : 'none';
-                        document.getElementById('crosshair').style.display = rightMouseDown ? 'none' : 'block';
+                        if (isPointerLocked) {
+                            document.getElementById('crosshair').style.display = 'block';
+                        } else {
+                            document.getElementById('lockPrompt').style.display = 'block';
+                        }
                     }
                 }
             });
@@ -1451,6 +1406,7 @@
             // Check speed zones for temporary boost
             speedZones.forEach(zone => {
                 const distance = localPlayer.mesh.position.distanceTo(zone.position);
+                // Activate boost if close enough and not already active
                 if (distance < 5 && !speedBoostActive) {
                     activateSpeedBoost();
                 }
@@ -1471,7 +1427,7 @@
                     if (isMobile) {
                         addChatMessage('Tap screen 3 times within 1.5s to shoot!', 'system');
                     } else {
-                        addChatMessage('Left click to shoot! Right-click to rotate camera!', 'system');
+                        addChatMessage('Click to AIM, then Click to SHOOT!', 'system');
                     }
                     respawnGun();
                 }
