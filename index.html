@@ -890,7 +890,10 @@
 
         // WebSocket connection
         function connectWebSocket() {
-            const serverUrl = 'wsss://localhost:3000';
+            // Auto-detect WebSocket URL based on current page
+const isSecure = window.location.protocol === 'https:';
+const wsProtocol = isSecure ? 'wss:' : 'ws:';
+const serverUrl = wsProtocol + '//' + window.location.host;
             
             try {
                 wss = new WebSocket(serverUrl);
